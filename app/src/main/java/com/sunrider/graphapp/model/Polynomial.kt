@@ -2,6 +2,11 @@ package com.sunrider.graphapp.model
 
 import kotlin.math.abs
 
+fun Int.toSuperscript(): String {
+    val superscriptDigits = charArrayOf('⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹')
+    return this.toString().map { superscriptDigits[it - '0'] }.joinToString("")
+}
+
 data class Polynomial(
     val coefficients: Map<Int, Long> = emptyMap()
 ) {
@@ -86,8 +91,8 @@ data class Polynomial(
                     power == 0 -> append(absCoeff)
                     power == 1 && absCoeff == 1L -> append("x")
                     power == 1 -> append("${absCoeff}x")
-                    absCoeff == 1L -> append("x^$power")
-                    else -> append("${absCoeff}x^$power")
+                    absCoeff == 1L -> append("x${power.toSuperscript()}")
+                    else -> append("${absCoeff}x${power.toSuperscript()}")
                 }
             }
         }

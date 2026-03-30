@@ -3,6 +3,7 @@ package com.sunrider.graphapp.algorithm
 import androidx.compose.ui.geometry.Offset
 import com.sunrider.graphapp.model.Graph
 import com.sunrider.graphapp.model.Polynomial
+import com.sunrider.graphapp.model.toSuperscript
 
 class ChromaticPolynomialAlgorithm : GraphAlgorithm {
 
@@ -58,7 +59,7 @@ class ChromaticPolynomialAlgorithm : GraphAlgorithm {
                 depth = depth,
                 polynomial = poly,
                 isBaseCase = true,
-                baseCaseDescription = "x^$n (O$n)"
+                baseCaseDescription = "x${n.toSuperscript()} (O$n)"
             )
         }
 

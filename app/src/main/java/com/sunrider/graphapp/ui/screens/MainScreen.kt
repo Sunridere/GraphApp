@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -29,9 +31,11 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,12 +65,23 @@ import com.sunrider.graphapp.viewmodel.EditMode
 import com.sunrider.graphapp.viewmodel.GraphViewModel
 
 @Composable
-fun MainScreen(viewModel: GraphViewModel, modifier: Modifier = Modifier) {
+fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxSize()) {
         // Info bar
         InfoBar(
             vertexCount = viewModel.graph.vertexCount,
-            edgeCount = viewModel.graph.edgeCount
+            edgeCount = viewModel.graph.edgeCount,
+            isDirected = viewModel.isDirected,
+            isWeighted = viewModel.isWeighted
+        )
+
+        // Graph type toggles
+        GraphTypeBar(
+            isDirected = viewModel.isDirected,
+            isWeighted = viewModel.isWeighted,
+            hasEdges = viewModel.graph.edges.isNotEmpty(),
+            onToggleDirected = { viewModel.toggleDirected() },
+            onToggleWeighted = { viewModel.toggleWeighted() }
         )
 
         // Mode selector
@@ -80,6 +96,8 @@ fun MainScreen(viewModel: GraphViewModel, modifier: Modifier = Modifier) {
                 .fillMaxWidth()
                 .weight(1f)
         ) {
+            val mstEdges = if (viewModel.showMstResult) viewModel.mstResult?.edges ?: emptySet() else emptySet()
+
             GraphCanvas(
                 graph = viewModel.graph,
                 vertexPositions = viewModel.vertexPositions,
@@ -88,6 +106,8 @@ fun MainScreen(viewModel: GraphViewModel, modifier: Modifier = Modifier) {
                 editMode = viewModel.editMode,
                 canvasScale = viewModel.canvasScale,
                 canvasOffset = viewModel.canvasOffset,
+                mstEdges = mstEdges,
+                isWeighted = viewModel.isWeighted,
                 onTap = { offset ->
                     val vertex = viewModel.findVertexAt(offset)
                     when (viewModel.editMode) {
@@ -95,7 +115,12 @@ fun MainScreen(viewModel: GraphViewModel, modifier: Modifier = Modifier) {
                             if (vertex == null) viewModel.addVertex(offset)
                         }
                         EditMode.ADD_EDGE -> {
-                            if (vertex != null) viewModel.onVertexTap(vertex)
+                            if (vertex != null) {
+                                viewModel.onVertexTap(vertex)
+                            } else if (viewModel.isWeighted) {
+                                val edge = viewModel.findEdgeAt(offset)
+                                if (edge != null) viewModel.startEditWeight(edge)
+                            }
                         }
                         EditMode.DELETE -> {
                             if (vertex != null) {
@@ -128,10 +153,23 @@ fun MainScreen(viewModel: GraphViewModel, modifier: Modifier = Modifier) {
                 }
             }
 
+            // MST result indicator
+            if (viewModel.showMstResult && viewModel.mstResult != null) {
+                MstResultBadge(
+                    totalWeight = viewModel.mstResult!!.totalWeight,
+                    edgeCount = viewModel.mstResult!!.edges.size,
+                    onDismiss = { viewModel.clearMstResult() },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                )
+            }
+
             // Adjacency matrix panel
             if (viewModel.showAdjacencyMatrix && viewModel.graph.vertices.isNotEmpty()) {
                 AdjacencyMatrixPanel(
                     graph = viewModel.graph,
+                    isWeighted = viewModel.isWeighted,
                     onHide = { viewModel.toggleAdjacencyMatrix() },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -143,8 +181,12 @@ fun MainScreen(viewModel: GraphViewModel, modifier: Modifier = Modifier) {
                 onClear = { viewModel.clearGraph() },
                 onExecute = { viewModel.executeAlgorithm(it) },
                 onShowMatrix = { viewModel.toggleAdjacencyMatrix() },
+                onExecuteMST = { viewModel.executeMST() },
+                onOpenMatrixInput = onOpenMatrixInput,
                 graphIsEmpty = viewModel.graph.vertices.isEmpty(),
                 showingMatrix = viewModel.showAdjacencyMatrix,
+                isDirected = viewModel.isDirected,
+                isWeighted = viewModel.isWeighted,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
 
@@ -168,19 +210,61 @@ fun MainScreen(viewModel: GraphViewModel, modifier: Modifier = Modifier) {
             }
         }
     }
+
+    // Weight editing dialog
+    viewModel.editingWeightEdge?.let { edge ->
+        WeightEditDialog(
+            edge = edge,
+            currentWeight = viewModel.graph.getWeight(edge),
+            onConfirm = { viewModel.confirmEditWeight(it) },
+            onDismiss = { viewModel.cancelEditWeight() }
+        )
+    }
 }
 
 @Composable
-private fun InfoBar(vertexCount: Int, edgeCount: Int) {
+private fun InfoBar(vertexCount: Int, edgeCount: Int, isDirected: Boolean, isWeighted: Boolean) {
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
+        val typeLabel = buildString {
+            if (isDirected) append("ориент.") else append("неориент.")
+            if (isWeighted) append(", взвеш.")
+        }
         Text(
-            text = "Вершин: $vertexCount  |  Рёбер: $edgeCount",
+            text = "Вершин: $vertexCount  |  Рёбер: $edgeCount  |  $typeLabel",
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    }
+}
+
+@Composable
+private fun GraphTypeBar(
+    isDirected: Boolean,
+    isWeighted: Boolean,
+    hasEdges: Boolean,
+    onToggleDirected: () -> Unit,
+    onToggleWeighted: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterChip(
+            selected = isDirected,
+            onClick = onToggleDirected,
+            label = { Text("Ориентированный", fontSize = 13.sp) },
+            enabled = !hasEdges
+        )
+        FilterChip(
+            selected = isWeighted,
+            onClick = onToggleWeighted,
+            label = { Text("Взвешенный", fontSize = 13.sp) }
         )
     }
 }
@@ -228,8 +312,12 @@ private fun ActionBar(
     onClear: () -> Unit,
     onExecute: (GraphAlgorithm) -> Unit,
     onShowMatrix: () -> Unit,
+    onExecuteMST: () -> Unit,
+    onOpenMatrixInput: () -> Unit,
     graphIsEmpty: Boolean,
     showingMatrix: Boolean,
+    isDirected: Boolean,
+    isWeighted: Boolean,
     modifier: Modifier = Modifier
 ) {
     var showAlgorithmMenu by remember { mutableStateOf(false) }
@@ -256,33 +344,15 @@ private fun ActionBar(
             Text("Очистить")
         }
 
-        if (showingMatrix) {
-            Button(
-                onClick = onShowMatrix,
-                enabled = !graphIsEmpty
-            ) {
-                Text("Матрица")
-            }
-        } else {
-            OutlinedButton(
-                onClick = onShowMatrix,
-                enabled = !graphIsEmpty
-            ) {
-                Text("Матрица")
-            }
+        OutlinedButton(onClick = onOpenMatrixInput) {
+            Text("Ввод")
         }
 
         Spacer(Modifier.weight(1f))
 
         Box {
             FilledTonalButton(
-                onClick = {
-                    if (algorithms.size == 1) {
-                        onExecute(algorithms[0])
-                    } else {
-                        showAlgorithmMenu = true
-                    }
-                },
+                onClick = { showAlgorithmMenu = true },
                 enabled = !graphIsEmpty
             ) {
                 Text("Вычислить")
@@ -291,20 +361,112 @@ private fun ActionBar(
                 expanded = showAlgorithmMenu,
                 onDismissRequest = { showAlgorithmMenu = false }
             ) {
-                algorithms.forEach { algo ->
+                DropdownMenuItem(
+                    text = { Text(if (showingMatrix) "Скрыть матрицу" else "Матрица смежности") },
+                    onClick = {
+                        showAlgorithmMenu = false
+                        onShowMatrix()
+                    }
+                )
+                // MST — only for undirected graphs
+                if (!isDirected) {
                     DropdownMenuItem(
-                        text = { Text(algo.name) },
+                        text = { Text("МОД (Краскал)") },
                         onClick = {
                             showAlgorithmMenu = false
-                            onExecute(algo)
+                            onExecuteMST()
                         }
                     )
+                }
+                // Chromatic algorithms — only for undirected graphs
+                if (!isDirected) {
+                    algorithms.forEach { algo ->
+                        DropdownMenuItem(
+                            text = { Text(algo.name) },
+                            onClick = {
+                                showAlgorithmMenu = false
+                                onExecute(algo)
+                            }
+                        )
+                    }
                 }
             }
         }
     }
     } // Column
     } // Surface
+}
+
+@Composable
+private fun MstResultBadge(
+    totalWeight: Int,
+    edgeCount: Int,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFF4CAF50).copy(alpha = 0.9f)
+        ),
+        modifier = modifier.clickable { onDismiss() }
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "МОД (Краскал)",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+            Text(
+                text = "Вес: $totalWeight  |  Рёбер: $edgeCount",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.9f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeightEditDialog(
+    edge: com.sunrider.graphapp.model.Edge,
+    currentWeight: Int,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var weightText by remember(edge) { mutableStateOf(currentWeight.toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Вес ребра ${edge.from} → ${edge.to}") },
+        text = {
+            OutlinedTextField(
+                value = weightText,
+                onValueChange = { newValue ->
+                    if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                        weightText = newValue
+                    }
+                },
+                label = { Text("Вес (положительное число)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val w = weightText.toIntOrNull()
+                    if (w != null && w > 0) onConfirm(w)
+                },
+                enabled = (weightText.toIntOrNull() ?: 0) > 0
+            ) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
 }
 
 @Composable
@@ -565,10 +727,12 @@ private fun LevelEntryItem(entry: LevelEntry, showGraph: Boolean = true) {
 @Composable
 private fun AdjacencyMatrixPanel(
     graph: com.sunrider.graphapp.model.Graph,
+    isWeighted: Boolean,
     onHide: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val (sortedVertices, matrix) = graph.getAdjacencyMatrix()
+    val (sortedVertices, matrix) = if (isWeighted) graph.getWeightedAdjacencyMatrix()
+        else graph.getAdjacencyMatrix()
     val cellSize = 36.dp
 
     Surface(
@@ -645,7 +809,7 @@ private fun AdjacencyMatrixPanel(
                             row.forEachIndexed { colIndex, value ->
                                 val bgColor = when {
                                     rowIndex == colIndex -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                    value == 1 -> MaterialTheme.colorScheme.primaryContainer
+                                    value > 0 -> MaterialTheme.colorScheme.primaryContainer
                                     else -> Color.Transparent
                                 }
                                 Box(
@@ -663,9 +827,9 @@ private fun AdjacencyMatrixPanel(
                                         text = "$value",
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontFamily = FontFamily.Monospace,
-                                            fontWeight = if (value == 1) FontWeight.Bold else FontWeight.Normal
+                                            fontWeight = if (value > 0) FontWeight.Bold else FontWeight.Normal
                                         ),
-                                        color = if (value == 1)
+                                        color = if (value > 0)
                                             MaterialTheme.colorScheme.onPrimaryContainer
                                         else
                                             MaterialTheme.colorScheme.onSurfaceVariant

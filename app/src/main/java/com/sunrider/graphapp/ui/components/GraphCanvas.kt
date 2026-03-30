@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -29,10 +30,13 @@ import com.sunrider.graphapp.model.Edge
 import com.sunrider.graphapp.model.Graph
 import com.sunrider.graphapp.viewmodel.EditMode
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 private const val VERTEX_RADIUS = 24f
+private const val ARROW_SIZE = 14f
 
 @Composable
 fun GraphCanvas(
@@ -43,6 +47,8 @@ fun GraphCanvas(
     editMode: EditMode,
     canvasScale: Float,
     canvasOffset: Offset,
+    mstEdges: Set<Edge> = emptySet(),
+    isWeighted: Boolean = false,
     onTap: (Offset) -> Unit,
     onDragVertex: (Int, Offset) -> Unit,
     onTransformChange: (scale: Float, offset: Offset) -> Unit,
@@ -52,15 +58,12 @@ fun GraphCanvas(
     val textMeasurer = rememberTextMeasurer()
     var draggedVertex by remember { mutableStateOf<Int?>(null) }
 
-    // rememberUpdatedState чтобы pointerInput всегда видел актуальные значения
-    // без пересоздания блока при каждом панировании/зуме
     val latestScale = rememberUpdatedState(canvasScale)
     val latestOffset = rememberUpdatedState(canvasOffset)
 
     fun screenToWorld(p: Offset): Offset =
         (p - latestOffset.value) / latestScale.value
 
-    // Трансформируемое состояние: зум и перемещение двумя пальцами
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
         val newScale = (latestScale.value * zoomChange).coerceIn(0.1f, 10f)
         onTransformChange(newScale, latestOffset.value + panChange)
@@ -69,19 +72,14 @@ fun GraphCanvas(
     Canvas(
         modifier = modifier
             .background(Color(0xFFF5F5F5))
-            // transformable обрабатывает пинч-зум и двухпальцевое перемещение
             .transformable(transformableState)
-            // pointerInput обрабатывает нажатия и перетаскивание вершин
             .pointerInput(editMode) {
                 when (editMode) {
                     EditMode.MOVE -> awaitEachGesture {
-                        // Ждём первое касание (не потребляем, чтобы transformable
-                        // мог обработать жест если касание не на вершине)
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val startVertex = findVertexAt(screenToWorld(down.position))
 
                         if (startVertex != null) {
-                            // Касание на вершине: потребляем события и двигаем вершину
                             draggedVertex = startVertex
                             down.consume()
                             while (true) {
@@ -93,8 +91,6 @@ fun GraphCanvas(
                             }
                             draggedVertex = null
                         }
-                        // Касание на пустом месте: не потребляем —
-                        // transformable обрабатывает перемещение/зум
                     }
 
                     else -> detectTapGestures { offset ->
@@ -103,12 +99,11 @@ fun GraphCanvas(
                 }
             }
     ) {
-        // Применяем трансформацию ко всей отрисовке графа
         withTransform({
             translate(canvasOffset.x, canvasOffset.y)
             scale(canvasScale, canvasScale, pivot = Offset.Zero)
         }) {
-            drawGraph(graph, vertexPositions, selectedVertex, highlightedEdge)
+            drawGraph(graph, vertexPositions, selectedVertex, highlightedEdge, mstEdges, isWeighted)
 
             // Подписи вершин
             graph.vertices.forEach { id ->
@@ -125,6 +120,37 @@ fun GraphCanvas(
                     )
                 )
             }
+
+            // Веса рёбер
+            if (isWeighted) {
+                graph.edges.forEach { edge ->
+                    val from = vertexPositions[edge.from] ?: return@forEach
+                    val to = vertexPositions[edge.to] ?: return@forEach
+                    val mid = Offset((from.x + to.x) / 2, (from.y + to.y) / 2)
+                    val dx = to.x - from.x
+                    val dy = to.y - from.y
+                    val len = sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
+                    // Смещение перпендикулярно ребру
+                    val offsetX = -dy / len * 12f
+                    val offsetY = dx / len * 12f
+                    val weight = graph.getWeight(edge)
+                    val isMst = edge in mstEdges
+                    val weightLayout = textMeasurer.measure(
+                        text = AnnotatedString(weight.toString()),
+                        style = TextStyle(
+                            color = if (isMst) Color(0xFF2E7D32) else Color(0xFF424242),
+                            fontSize = 11.sp
+                        )
+                    )
+                    drawText(
+                        textLayoutResult = weightLayout,
+                        topLeft = Offset(
+                            mid.x + offsetX - weightLayout.size.width / 2,
+                            mid.y + offsetY - weightLayout.size.height / 2
+                        )
+                    )
+                }
+            }
         }
     }
 }
@@ -133,18 +159,37 @@ private fun DrawScope.drawGraph(
     graph: Graph,
     positions: Map<Int, Offset>,
     selectedVertex: Int?,
-    highlightedEdge: Edge?
+    highlightedEdge: Edge?,
+    mstEdges: Set<Edge>,
+    isWeighted: Boolean
 ) {
     graph.edges.forEach { edge ->
         val from = positions[edge.from] ?: return@forEach
         val to = positions[edge.to] ?: return@forEach
         val isHighlighted = highlightedEdge == edge
-        drawLine(
-            color = if (isHighlighted) Color(0xFFE53935) else Color(0xFF757575),
-            start = from,
-            end = to,
-            strokeWidth = if (isHighlighted) 5f else 2.5f
-        )
+        val isMst = edge in mstEdges
+
+        val edgeColor = when {
+            isHighlighted -> Color(0xFFE53935)
+            isMst -> Color(0xFF4CAF50)
+            else -> Color(0xFF757575)
+        }
+        val strokeWidth = when {
+            isHighlighted -> 5f
+            isMst -> 4f
+            else -> 2.5f
+        }
+
+        if (graph.isDirected) {
+            drawArrowEdge(from, to, edgeColor, strokeWidth)
+        } else {
+            drawLine(
+                color = edgeColor,
+                start = from,
+                end = to,
+                strokeWidth = strokeWidth
+            )
+        }
     }
 
     graph.vertices.forEach { id ->
@@ -162,6 +207,50 @@ private fun DrawScope.drawGraph(
             style = Stroke(width = 2.5f)
         )
     }
+}
+
+private fun DrawScope.drawArrowEdge(
+    from: Offset,
+    to: Offset,
+    color: Color,
+    strokeWidth: Float
+) {
+    val dx = to.x - from.x
+    val dy = to.y - from.y
+    val dist = sqrt(dx * dx + dy * dy)
+    if (dist < 1f) return
+
+    val ux = dx / dist
+    val uy = dy / dist
+
+    // Укорачиваем линию до границы вершины
+    val endX = to.x - ux * VERTEX_RADIUS
+    val endY = to.y - uy * VERTEX_RADIUS
+    val startX = from.x + ux * VERTEX_RADIUS
+    val startY = from.y + uy * VERTEX_RADIUS
+
+    drawLine(
+        color = color,
+        start = Offset(startX, startY),
+        end = Offset(endX, endY),
+        strokeWidth = strokeWidth
+    )
+
+    // Стрелка
+    val angle = atan2(dy.toDouble(), dx.toDouble())
+    val arrowAngle = PI / 6
+    val ax1 = endX - ARROW_SIZE * cos(angle - arrowAngle).toFloat()
+    val ay1 = endY - ARROW_SIZE * sin(angle - arrowAngle).toFloat()
+    val ax2 = endX - ARROW_SIZE * cos(angle + arrowAngle).toFloat()
+    val ay2 = endY - ARROW_SIZE * sin(angle + arrowAngle).toFloat()
+
+    val path = Path().apply {
+        moveTo(endX, endY)
+        lineTo(ax1, ay1)
+        lineTo(ax2, ay2)
+        close()
+    }
+    drawPath(path, color)
 }
 
 @Composable

@@ -3,59 +3,85 @@ package com.sunrider.graphapp.model
 data class Edge(val from: Int, val to: Int) {
     fun contains(vertex: Int) = from == vertex || to == vertex
     fun other(vertex: Int) = if (from == vertex) to else from
-
-    override fun equals(other: Any?): Boolean {
-        if (other !is Edge) return false
-        return (from == other.from && to == other.to) || (from == other.to && to == other.from)
-    }
-
-    override fun hashCode(): Int = minOf(from, to) * 31 + maxOf(from, to)
     override fun toString(): String = "($from, $to)"
 }
 
 data class Graph(
     val vertices: Set<Int> = emptySet(),
-    val edges: Set<Edge> = emptySet()
+    val edges: Set<Edge> = emptySet(),
+    val isDirected: Boolean = false,
+    val weights: Map<Edge, Int> = emptyMap()
 ) {
     val vertexCount get() = vertices.size
     val edgeCount get() = edges.size
 
+    fun normalizeEdge(from: Int, to: Int): Edge =
+        if (isDirected) Edge(from, to) else Edge(minOf(from, to), maxOf(from, to))
+
+    fun normalizeEdge(edge: Edge): Edge =
+        if (isDirected) edge else Edge(minOf(edge.from, edge.to), maxOf(edge.from, edge.to))
+
     fun addVertex(id: Int) = copy(vertices = vertices + id)
 
-    fun removeVertex(id: Int) = Graph(
+    fun removeVertex(id: Int) = copy(
         vertices = vertices - id,
-        edges = edges.filter { !it.contains(id) }.toSet()
+        edges = edges.filter { !it.contains(id) }.toSet(),
+        weights = weights.filter { !it.key.contains(id) }
     )
 
-    fun addEdge(from: Int, to: Int): Graph {
+    fun addEdge(from: Int, to: Int, weight: Int = 1): Graph {
         if (from == to || from !in vertices || to !in vertices) return this
-        val edge = Edge(from, to)
+        val edge = normalizeEdge(from, to)
         if (edge in edges) return this
-        return copy(edges = edges + edge)
+        return copy(
+            edges = edges + edge,
+            weights = weights + (edge to weight)
+        )
     }
 
-    fun removeEdge(edge: Edge) = copy(edges = edges - edge)
+    fun removeEdge(edge: Edge): Graph {
+        val normalized = normalizeEdge(edge)
+        return copy(
+            edges = edges - normalized,
+            weights = weights - normalized
+        )
+    }
 
-    fun hasEdge(from: Int, to: Int) = Edge(from, to) in edges
+    fun hasEdge(from: Int, to: Int): Boolean {
+        val edge = normalizeEdge(from, to)
+        return edge in edges
+    }
+
+    fun getWeight(edge: Edge): Int = weights[normalizeEdge(edge)] ?: 1
+    fun getWeight(from: Int, to: Int): Int = weights[normalizeEdge(from, to)] ?: 1
+
+    fun setWeight(edge: Edge, weight: Int): Graph {
+        val normalized = normalizeEdge(edge)
+        return copy(weights = weights + (normalized to weight))
+    }
 
     fun neighbors(vertex: Int): Set<Int> =
         edges.filter { it.contains(vertex) }.map { it.other(vertex) }.toSet()
 
+    fun outNeighbors(vertex: Int): Set<Int> =
+        edges.filter { it.from == vertex }.map { it.to }.toSet()
+
     fun contractEdge(edge: Edge): Graph {
+        val normalized = normalizeEdge(edge)
         val keep = minOf(edge.from, edge.to)
         val remove = maxOf(edge.from, edge.to)
         val newVertices = vertices - remove
         val newEdges = edges
-            .filter { it != edge }
+            .filter { it != normalized }
             .map { e ->
-                Edge(
+                normalizeEdge(
                     if (e.from == remove) keep else e.from,
                     if (e.to == remove) keep else e.to
                 )
             }
             .filter { it.from != it.to }
             .toSet()
-        return Graph(newVertices, newEdges)
+        return copy(vertices = newVertices, edges = newEdges, weights = emptyMap())
     }
 
     fun isComplete(): Boolean {
@@ -69,7 +95,7 @@ data class Graph(
         for (i in vList.indices) {
             for (j in i + 1 until vList.size) {
                 if (!hasEdge(vList[i], vList[j])) {
-                    return Edge(vList[i], vList[j])
+                    return normalizeEdge(vList[i], vList[j])
                 }
             }
         }
@@ -81,6 +107,16 @@ data class Graph(
         val matrix = sortedVertices.map { i ->
             sortedVertices.map { j ->
                 if (hasEdge(i, j)) 1 else 0
+            }
+        }
+        return sortedVertices to matrix
+    }
+
+    fun getWeightedAdjacencyMatrix(): Pair<List<Int>, List<List<Int>>> {
+        val sortedVertices = vertices.sorted()
+        val matrix = sortedVertices.map { i ->
+            sortedVertices.map { j ->
+                if (hasEdge(i, j)) getWeight(i, j) else 0
             }
         }
         return sortedVertices to matrix

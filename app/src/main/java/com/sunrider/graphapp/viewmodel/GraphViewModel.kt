@@ -11,6 +11,8 @@ import com.sunrider.graphapp.algorithm.AlgorithmResult
 import com.sunrider.graphapp.algorithm.ChromaticAdditionAlgorithm
 import com.sunrider.graphapp.algorithm.ChromaticPolynomialAlgorithm
 import com.sunrider.graphapp.algorithm.GraphAlgorithm
+import com.sunrider.graphapp.algorithm.KruskalMSTAlgorithm
+import com.sunrider.graphapp.algorithm.MSTResult
 import com.sunrider.graphapp.model.Edge
 import com.sunrider.graphapp.model.Graph
 
@@ -47,6 +49,21 @@ class GraphViewModel : ViewModel() {
     var canvasOffset by mutableStateOf(Offset.Zero)
         private set
 
+    var isDirected by mutableStateOf(false)
+        private set
+
+    var isWeighted by mutableStateOf(false)
+        private set
+
+    var mstResult by mutableStateOf<MSTResult?>(null)
+        private set
+
+    var showMstResult by mutableStateOf(false)
+        private set
+
+    var editingWeightEdge by mutableStateOf<Edge?>(null)
+        private set
+
     private var nextVertexId = 1
 
     fun updateCanvasTransform(scale: Float, offset: Offset) {
@@ -64,6 +81,18 @@ class GraphViewModel : ViewModel() {
         ChromaticAdditionAlgorithm()
     )
 
+    fun toggleDirected() {
+        if (graph.edges.isNotEmpty()) return // нельзя менять тип если есть рёбра
+        isDirected = !isDirected
+        graph = graph.copy(isDirected = isDirected)
+        clearMstResult()
+    }
+
+    fun toggleWeighted() {
+        isWeighted = !isWeighted
+        clearMstResult()
+    }
+
     fun addVertex(position: Offset) {
         val id = nextVertexId++
         graph = graph.addVertex(id)
@@ -79,6 +108,7 @@ class GraphViewModel : ViewModel() {
                 } else {
                     graph = graph.addEdge(sel, id)
                     selectedVertex = null
+                    clearMstResult()
                 }
             }
             EditMode.DELETE -> deleteVertex(id)
@@ -90,32 +120,66 @@ class GraphViewModel : ViewModel() {
         graph = graph.removeVertex(id)
         vertexPositions = vertexPositions - id
         if (selectedVertex == id) selectedVertex = null
+        clearMstResult()
     }
 
     fun deleteEdge(edge: Edge) {
         graph = graph.removeEdge(edge)
+        clearMstResult()
     }
 
     fun moveVertex(id: Int, newPosition: Offset) {
         vertexPositions = vertexPositions + (id to newPosition)
     }
 
+    fun startEditWeight(edge: Edge) {
+        editingWeightEdge = edge
+    }
+
+    fun confirmEditWeight(weight: Int) {
+        val edge = editingWeightEdge ?: return
+        if (weight > 0) {
+            graph = graph.setWeight(edge, weight)
+            clearMstResult()
+        }
+        editingWeightEdge = null
+    }
+
+    fun cancelEditWeight() {
+        editingWeightEdge = null
+    }
+
     fun clearGraph() {
-        graph = Graph()
+        graph = Graph(isDirected = isDirected)
         vertexPositions = emptyMap()
         selectedVertex = null
         nextVertexId = 1
         algorithmResult = null
         showResult = false
         currentLevelIndex = 0
+        clearMstResult()
         resetCanvasTransform()
     }
 
     fun executeAlgorithm(algorithm: GraphAlgorithm) {
         if (graph.vertices.isEmpty()) return
+        if (graph.isDirected) return // хроматические алгоритмы только для ненаправленных
         algorithmResult = algorithm.execute(graph, vertexPositions)
         currentLevelIndex = 0
         showResult = true
+    }
+
+    fun executeMST() {
+        if (graph.vertices.size < 2) return
+        if (graph.isDirected) return // MST только для ненаправленных
+        val result = KruskalMSTAlgorithm().execute(graph)
+        mstResult = result
+        showMstResult = result != null
+    }
+
+    fun clearMstResult() {
+        mstResult = null
+        showMstResult = false
     }
 
     fun nextLevel() {
@@ -140,6 +204,62 @@ class GraphViewModel : ViewModel() {
 
     fun toggleAdjacencyMatrix() {
         showAdjacencyMatrix = !showAdjacencyMatrix
+    }
+
+    fun applyAdjacencyMatrix(size: Int, matrix: List<List<Int>>, isWeightedInput: Boolean, isDirectedInput: Boolean) {
+        // Determine starting vertex ID (continue from existing)
+        val startId = if (graph.vertices.isEmpty()) 1 else (graph.vertices.max() + 1)
+        val ids = (startId until startId + size).toList()
+
+        // Update directed/weighted flags if graph is empty
+        if (graph.vertices.isEmpty()) {
+            isDirected = isDirectedInput
+            isWeighted = isWeightedInput
+            graph = graph.copy(isDirected = isDirectedInput)
+        } else if (isWeightedInput) {
+            isWeighted = true
+        }
+
+        // Add vertices
+        var g = graph
+        for (id in ids) {
+            g = g.addVertex(id)
+        }
+
+        // Add edges from matrix
+        for (i in 0 until size) {
+            for (j in 0 until size) {
+                val value = matrix[i][j]
+                if (value > 0 && i != j) {
+                    if (!isDirectedInput && j < i) continue // avoid duplicates for undirected
+                    g = g.addEdge(ids[i], ids[j], value)
+                }
+            }
+        }
+        graph = g
+
+        // Update nextVertexId
+        nextVertexId = (graph.vertices.maxOrNull() ?: 0) + 1
+
+        // Auto-layout new vertices in a circle
+        val existingPositions = vertexPositions.toMutableMap()
+        val newIds = ids.filter { it !in existingPositions }
+        if (newIds.isNotEmpty()) {
+            val cx = 500f
+            val cy = 500f
+            val radius = 300f
+            val angleStep = 2.0 * kotlin.math.PI / newIds.size
+            newIds.forEachIndexed { index, id ->
+                val angle = angleStep * index - kotlin.math.PI / 2
+                existingPositions[id] = androidx.compose.ui.geometry.Offset(
+                    (cx + radius * kotlin.math.cos(angle)).toFloat(),
+                    (cy + radius * kotlin.math.sin(angle)).toFloat()
+                )
+            }
+            vertexPositions = existingPositions
+        }
+
+        clearMstResult()
     }
 
     fun findVertexAt(position: Offset, radius: Float = 50f): Int? {
