@@ -21,24 +21,30 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.OpenWith
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,36 +67,42 @@ import com.sunrider.graphapp.algorithm.LevelEntry
 import com.sunrider.graphapp.algorithm.RecursionLevel
 import com.sunrider.graphapp.ui.components.GraphCanvas
 import com.sunrider.graphapp.ui.components.GraphPreview
+import com.sunrider.graphapp.ui.theme.DirectedAccent
+import com.sunrider.graphapp.ui.theme.MstTeal
+import com.sunrider.graphapp.ui.theme.MstTealBright
+import com.sunrider.graphapp.ui.theme.WeightedAccent
 import com.sunrider.graphapp.viewmodel.EditMode
 import com.sunrider.graphapp.viewmodel.GraphViewModel
 
+private sealed class AlgoChoice(val displayName: String) {
+    data class Algo(val algorithm: GraphAlgorithm) : AlgoChoice(algorithm.name)
+    object Mst : AlgoChoice("МОД (Краскал)")
+}
+
 @Composable
 fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.fillMaxSize()) {
-        // Info bar
+    var selectedChoice by remember {
+        mutableStateOf<AlgoChoice>(
+            viewModel.algorithms.firstOrNull()?.let { AlgoChoice.Algo(it) } ?: AlgoChoice.Mst
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         InfoBar(
             vertexCount = viewModel.graph.vertexCount,
             edgeCount = viewModel.graph.edgeCount,
             isDirected = viewModel.isDirected,
-            isWeighted = viewModel.isWeighted
-        )
-
-        // Graph type toggles
-        GraphTypeBar(
-            isDirected = viewModel.isDirected,
             isWeighted = viewModel.isWeighted,
-            hasEdges = viewModel.graph.edges.isNotEmpty(),
             onToggleDirected = { viewModel.toggleDirected() },
-            onToggleWeighted = { viewModel.toggleWeighted() }
+            onToggleWeighted = { viewModel.toggleWeighted() },
+            canToggleDirected = viewModel.graph.edges.isEmpty()
         )
 
-        // Mode selector
-        ModeSelector(
-            currentMode = viewModel.editMode,
-            onModeChanged = { viewModel.editMode = it }
-        )
-
-        // Graph canvas
+        // Canvas area takes remaining space, with floating MST badge
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -141,6 +153,11 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
                 modifier = Modifier.fillMaxSize()
             )
 
+            // Empty state hint
+            if (viewModel.graph.vertices.isEmpty()) {
+                EmptyCanvasHint(modifier = Modifier.align(Alignment.Center))
+            }
+
             // Reset view button
             if (viewModel.canvasScale != 1f || viewModel.canvasOffset != Offset.Zero) {
                 androidx.compose.material3.SmallFloatingActionButton(
@@ -153,19 +170,15 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
                 }
             }
 
-            // MST result indicator
             if (viewModel.showMstResult && viewModel.mstResult != null) {
-                MstResultBadge(
-                    totalWeight = viewModel.mstResult!!.totalWeight,
-                    edgeCount = viewModel.mstResult!!.edges.size,
+                MstActiveBadge(
                     onDismiss = { viewModel.clearMstResult() },
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
+                        .align(Alignment.TopEnd)
+                        .padding(top = 10.dp, end = 10.dp)
                 )
             }
 
-            // Adjacency matrix panel
             if (viewModel.showAdjacencyMatrix && viewModel.graph.vertices.isNotEmpty()) {
                 AdjacencyMatrixPanel(
                     graph = viewModel.graph,
@@ -175,22 +188,6 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
                 )
             }
 
-            // Action bar
-            ActionBar(
-                algorithms = viewModel.algorithms,
-                onClear = { viewModel.clearGraph() },
-                onExecute = { viewModel.executeAlgorithm(it) },
-                onShowMatrix = { viewModel.toggleAdjacencyMatrix() },
-                onExecuteMST = { viewModel.executeMST() },
-                onOpenMatrixInput = onOpenMatrixInput,
-                graphIsEmpty = viewModel.graph.vertices.isEmpty(),
-                showingMatrix = viewModel.showAdjacencyMatrix,
-                isDirected = viewModel.isDirected,
-                isWeighted = viewModel.isWeighted,
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
-
-            // Result panel
             val showResult = viewModel.showResult && viewModel.algorithmResult != null
             if (showResult) {
                 viewModel.algorithmResult?.let { result ->
@@ -209,9 +206,30 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
                 }
             }
         }
+
+        ModeSelector(
+            currentMode = viewModel.editMode,
+            onModeChanged = { viewModel.editMode = it }
+        )
+
+        ActionBar(
+            algorithms = viewModel.algorithms,
+            selectedChoice = selectedChoice,
+            onSelectChoice = { selectedChoice = it },
+            graphIsEmpty = viewModel.graph.vertices.isEmpty(),
+            isDirected = viewModel.isDirected,
+            onRun = {
+                when (val c = selectedChoice) {
+                    is AlgoChoice.Algo -> viewModel.executeAlgorithm(c.algorithm)
+                    AlgoChoice.Mst -> viewModel.executeMST()
+                }
+            },
+            onToggleMatrix = { viewModel.toggleAdjacencyMatrix() },
+            onClear = { viewModel.clearGraph() },
+            onOpenMatrixInput = onOpenMatrixInput
+        )
     }
 
-    // Weight editing dialog
     viewModel.editingWeightEdge?.let { edge ->
         WeightEditDialog(
             edge = edge,
@@ -222,170 +240,399 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
     }
 }
 
+// ─── Top info bar ─────────────────────────────────────────────────────────────
 @Composable
-private fun InfoBar(vertexCount: Int, edgeCount: Int, isDirected: Boolean, isWeighted: Boolean) {
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        val typeLabel = buildString {
-            if (isDirected) append("ориент.") else append("неориент.")
-            if (isWeighted) append(", взвеш.")
-        }
-        Text(
-            text = "Вершин: $vertexCount  |  Рёбер: $edgeCount  |  $typeLabel",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-    }
-}
-
-@Composable
-private fun GraphTypeBar(
+private fun InfoBar(
+    vertexCount: Int,
+    edgeCount: Int,
     isDirected: Boolean,
     isWeighted: Boolean,
-    hasEdges: Boolean,
     onToggleDirected: () -> Unit,
-    onToggleWeighted: () -> Unit
+    onToggleWeighted: () -> Unit,
+    canToggleDirected: Boolean,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        FilterChip(
-            selected = isDirected,
-            onClick = onToggleDirected,
-            label = { Text("Ориентированный", fontSize = 13.sp) },
-            enabled = !hasEdges
-        )
-        FilterChip(
-            selected = isWeighted,
-            onClick = onToggleWeighted,
-            label = { Text("Взвешенный", fontSize = 13.sp) }
-        )
-    }
-}
-
-@Composable
-private fun ModeSelector(currentMode: EditMode, onModeChanged: (EditMode) -> Unit) {
-    val modes = listOf(
-        EditMode.ADD_VERTEX to "Вершина",
-        EditMode.ADD_EDGE to "Ребро",
-        EditMode.DELETE to "Удалить",
-        EditMode.MOVE to "Двигать"
-    )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp)
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        modes.forEach { (mode, label) ->
-            val isSelected = mode == currentMode
-            if (isSelected) {
-                Button(
-                    onClick = {},
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    Text(label, fontSize = 14.sp)
-                }
-            } else {
-                OutlinedButton(
-                    onClick = { onModeChanged(mode) },
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    Text(label, fontSize = 14.sp)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActionBar(
-    algorithms: List<GraphAlgorithm>,
-    onClear: () -> Unit,
-    onExecute: (GraphAlgorithm) -> Unit,
-    onShowMatrix: () -> Unit,
-    onExecuteMST: () -> Unit,
-    onOpenMatrixInput: () -> Unit,
-    graphIsEmpty: Boolean,
-    showingMatrix: Boolean,
-    isDirected: Boolean,
-    isWeighted: Boolean,
-    modifier: Modifier = Modifier
-) {
-    var showAlgorithmMenu by remember { mutableStateOf(false) }
+    val primary = MaterialTheme.colorScheme.primary
+    val primaryContainer = MaterialTheme.colorScheme.primaryContainer
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 4.dp,
-        modifier = modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth()
     ) {
-    Column {
-    HorizontalDivider()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        OutlinedButton(
-            onClick = onClear,
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = MaterialTheme.colorScheme.error
-            )
-        ) {
-            Text("Очистить")
-        }
-
-        OutlinedButton(onClick = onOpenMatrixInput) {
-            Text("Ввод")
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        Box {
-            FilledTonalButton(
-                onClick = { showAlgorithmMenu = true },
-                enabled = !graphIsEmpty
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Вычислить")
-            }
-            DropdownMenu(
-                expanded = showAlgorithmMenu,
-                onDismissRequest = { showAlgorithmMenu = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text(if (showingMatrix) "Скрыть матрицу" else "Матрица смежности") },
-                    onClick = {
-                        showAlgorithmMenu = false
-                        onShowMatrix()
-                    }
+                // Logo
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("◈", fontSize = 14.sp, color = primary)
+                }
+                Text(
+                    text = "GraphApp",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                // MST — only for undirected graphs
-                if (!isDirected) {
-                    DropdownMenuItem(
-                        text = { Text("МОД (Краскал)") },
-                        onClick = {
-                            showAlgorithmMenu = false
-                            onExecuteMST()
-                        }
+
+                Spacer(Modifier.weight(1f))
+
+                CountBadge(label = "V", value = vertexCount)
+                CountBadge(label = "E", value = edgeCount)
+
+                if (isDirected) TypeChip("ОРИЕНТ.", DirectedAccent)
+                if (isWeighted) TypeChip("ВЗВЕШ.", WeightedAccent)
+
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                            RoundedCornerShape(8.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                // Chromatic algorithms — only for undirected graphs
-                if (!isDirected) {
-                    algorithms.forEach { algo ->
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.13f))
+            // Type toggles row (compact)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ToggleChip(
+                    label = "Ориентированный",
+                    selected = isDirected,
+                    enabled = canToggleDirected,
+                    onClick = onToggleDirected
+                )
+                ToggleChip(
+                    label = "Взвешенный",
+                    selected = isWeighted,
+                    enabled = true,
+                    onClick = onToggleWeighted
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CountBadge(label: String, value: Int) {
+    val primary = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(primary.copy(alpha = 0.12f))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = "$label: $value",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = primary
+        )
+    }
+}
+
+@Composable
+private fun TypeChip(label: String, accent: Color) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(accent.copy(alpha = 0.12f))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = accent,
+            letterSpacing = 0.4.sp
+        )
+    }
+}
+
+@Composable
+private fun ToggleChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val fg = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        selected -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(bg.copy(alpha = if (enabled) 1f else 0.5f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = fg
+        )
+    }
+}
+
+// ─── Empty state ──────────────────────────────────────────────────────────────
+@Composable
+private fun EmptyCanvasHint(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .border(
+                    1.5.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Нажмите на холст, чтобы добавить вершину",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Здесь отобразится ваш граф",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+// ─── Bottom mode selector ─────────────────────────────────────────────────────
+@Composable
+private fun ModeSelector(currentMode: EditMode, onModeChanged: (EditMode) -> Unit) {
+    val modes = listOf(
+        Triple(EditMode.ADD_VERTEX, "Вершина", Icons.Filled.Add),
+        Triple(EditMode.ADD_EDGE, "Ребро", Icons.Filled.Timeline),
+        Triple(EditMode.DELETE, "Удалить", Icons.Filled.Close),
+        Triple(EditMode.MOVE, "Двигать", Icons.Filled.OpenWith),
+    )
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.13f))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                modes.forEach { (mode, label, icon) ->
+                    val selected = mode == currentMode
+                    val bg = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                    val fg = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(bg)
+                            .clickable { onModeChanged(mode) }
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = label,
+                            tint = fg,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = label,
+                            fontSize = 10.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = fg
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Bottom action bar ────────────────────────────────────────────────────────
+@Composable
+private fun ActionBar(
+    algorithms: List<GraphAlgorithm>,
+    selectedChoice: AlgoChoice,
+    onSelectChoice: (AlgoChoice) -> Unit,
+    graphIsEmpty: Boolean,
+    isDirected: Boolean,
+    onRun: () -> Unit,
+    onToggleMatrix: () -> Unit,
+    onClear: () -> Unit,
+    onOpenMatrixInput: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    var moreExpanded by remember { mutableStateOf(false) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.13f))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Algorithm selector pill
+                Box(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable(enabled = !isDirected) { menuExpanded = true }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = selectedChoice.displayName,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        if (!isDirected) {
+                            algorithms.forEach { algo ->
+                                DropdownMenuItem(
+                                    text = { Text(algo.name) },
+                                    onClick = {
+                                        onSelectChoice(AlgoChoice.Algo(algo))
+                                        menuExpanded = false
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(AlgoChoice.Mst.displayName) },
+                                onClick = {
+                                    onSelectChoice(AlgoChoice.Mst)
+                                    menuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Run button
+                Button(
+                    onClick = onRun,
+                    enabled = !graphIsEmpty && !isDirected,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                    modifier = Modifier.height(40.dp)
+                ) {
+                    Text("Запуск", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                // More icon (matrix / clear / input)
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable { moreExpanded = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.GridView,
+                            contentDescription = "Действия",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = moreExpanded,
+                        onDismissRequest = { moreExpanded = false }
+                    ) {
                         DropdownMenuItem(
-                            text = { Text(algo.name) },
+                            text = { Text("Матрица смежности") },
                             onClick = {
-                                showAlgorithmMenu = false
-                                onExecute(algo)
+                                moreExpanded = false
+                                onToggleMatrix()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Ввод матрицы…") },
+                            onClick = {
+                                moreExpanded = false
+                                onOpenMatrixInput()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Очистить граф") },
+                            onClick = {
+                                moreExpanded = false
+                                onClear()
                             }
                         )
                     }
@@ -393,38 +640,37 @@ private fun ActionBar(
             }
         }
     }
-    } // Column
-    } // Surface
 }
 
+// ─── MST badge ────────────────────────────────────────────────────────────────
 @Composable
-private fun MstResultBadge(
-    totalWeight: Int,
-    edgeCount: Int,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF4CAF50).copy(alpha = 0.9f)
-        ),
-        modifier = modifier.clickable { onDismiss() }
+private fun MstActiveBadge(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(MstTeal.copy(alpha = 0.18f))
+            .border(1.dp, MstTeal.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            .clickable { onDismiss() }
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "МОД (Краскал)",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-            Text(
-                text = "Вес: $totalWeight  |  Рёбер: $edgeCount",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.9f)
-            )
-        }
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(MstTealBright, CircleShape)
+        )
+        Text(
+            text = "МОД АКТИВЕН",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MstTealBright,
+            letterSpacing = 0.5.sp
+        )
     }
 }
 
+// ─── Weight edit dialog ───────────────────────────────────────────────────────
 @Composable
 private fun WeightEditDialog(
     edge: com.sunrider.graphapp.model.Edge,
@@ -457,18 +703,15 @@ private fun WeightEditDialog(
                     if (w != null && w > 0) onConfirm(w)
                 },
                 enabled = (weightText.toIntOrNull() ?: 0) > 0
-            ) {
-                Text("OK")
-            }
+            ) { Text("OK") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
+            TextButton(onClick = onDismiss) { Text("Отмена") }
         }
     )
 }
 
+// ─── Result panel ─────────────────────────────────────────────────────────────
 @Composable
 private fun ResultPanel(
     levels: List<RecursionLevel>,
@@ -483,10 +726,7 @@ private fun ResultPanel(
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
-
-    LaunchedEffect(currentLevelIndex) {
-        listState.animateScrollToItem(currentLevelIndex)
-    }
+    LaunchedEffect(currentLevelIndex) { listState.animateScrollToItem(currentLevelIndex) }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -494,176 +734,143 @@ private fun ResultPanel(
         shadowElevation = 8.dp,
         modifier = modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // Polynomial + chromatic info
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = polynomialDisplay,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Column {
-                            Text(
-                                text = "Хроматическое число",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                            )
-                            Text(
-                                text = "χ(G) = $chromaticNumber",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Раскрасок в $chromaticNumber цвет(а/ов)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                            )
-                            Text(
-                                text = "P(G, $chromaticNumber) = $coloringCount",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // Level navigation
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedButton(
-                    onClick = onPrevious,
-                    enabled = currentLevelIndex > 0,
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    Text("<")
-                }
-
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Шаг ${currentLevelIndex + 1} из ${levels.size}",
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyMedium
+                    text = "Хроматический полином",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 0.6.sp,
+                    modifier = Modifier.weight(1f)
                 )
-
-                OutlinedButton(
-                    onClick = onNext,
-                    enabled = currentLevelIndex < levels.size - 1,
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    Text(">")
-                }
+                NavCircle(icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft, onClick = onPrevious)
+                Spacer(Modifier.width(4.dp))
+                NavCircle(icon = Icons.AutoMirrored.Filled.KeyboardArrowRight, onClick = onNext)
+                Spacer(Modifier.width(4.dp))
+                NavCircle(icon = Icons.Filled.Close, onClick = onHide)
             }
-
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = polynomialDisplay,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Spacer(Modifier.height(8.dp))
-
-            // Level list
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatBlock(label = "χ(G)", value = chromaticNumber.toString())
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(32.dp)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                )
+                StatBlock(label = "P(G, $chromaticNumber)", value = coloringCount.toString())
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "Шаг ${currentLevelIndex + 1} из ${levels.size}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
+                    .height(160.dp)
             ) {
                 itemsIndexed(levels) { index, level ->
                     LevelItem(
                         level = level,
-                        levelIndex = index,
                         isCurrent = index == currentLevelIndex,
                         onClick = { onGoToLevel(index) }
                     )
                 }
-            }
-
-            Spacer(Modifier.height(4.dp))
-
-            // Hide button
-            TextButton(
-                onClick = onHide,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text("Скрыть")
             }
         }
     }
 }
 
 @Composable
+private fun NavCircle(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp)
+        )
+    }
+}
+
+@Composable
+private fun StatBlock(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 0.6.sp
+        )
+        Text(
+            text = value,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+@Composable
 private fun LevelItem(
     level: RecursionLevel,
-    levelIndex: Int,
     isCurrent: Boolean,
     onClick: () -> Unit
 ) {
-    val bgColor = if (isCurrent) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-    } else {
-        Color.Transparent
-    }
-    val borderColor = if (isCurrent) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        Color.Transparent
-    }
+    val bgColor = if (isCurrent)
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    else MaterialTheme.colorScheme.surface
 
-    val title = if (level.isBackSubstitution) {
+    val title = if (level.isBackSubstitution)
         "Подстановка (ур. ${level.depth})"
-    } else {
+    else
         "Разложение (ур. ${level.depth})"
-    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .padding(vertical = 3.dp)
+            .clip(RoundedCornerShape(10.dp))
             .border(
-                width = if (isCurrent) 1.dp else 0.dp,
-                color = borderColor,
-                shape = RoundedCornerShape(8.dp)
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = if (isCurrent) 0.5f else 0.15f),
+                shape = RoundedCornerShape(10.dp)
             )
             .background(bgColor)
             .clickable { onClick() }
-            .padding(8.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        // Level title
         Text(
             text = title,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            color = if (level.isBackSubstitution)
-                MaterialTheme.colorScheme.tertiary
-            else
-                MaterialTheme.colorScheme.secondary
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
         )
-
         Spacer(Modifier.height(4.dp))
-
-        // Entries
         level.entries.forEach { entry ->
             LevelEntryItem(entry = entry, showGraph = !level.isBackSubstitution)
             Spacer(Modifier.height(2.dp))
@@ -677,53 +884,47 @@ private fun LevelEntryItem(entry: LevelEntry, showGraph: Boolean = true) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Mini graph preview
         if (showGraph) {
             GraphPreview(
                 graph = entry.graph,
                 vertexPositions = entry.positions,
                 highlightedEdge = entry.edge,
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(4.dp))
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(6.dp))
             )
-
             Spacer(Modifier.width(8.dp))
         }
-
         Column(modifier = Modifier.weight(1f)) {
-            // Formula
             Text(
                 text = entry.formulaText,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.Medium
-                )
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
             )
-            // Detail
             if (entry.detailText.isNotEmpty()) {
                 Text(
                     text = entry.detailText,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            // Show polynomial result for base cases
             if (entry.isBaseCase) {
                 Text(
                     text = "= ${entry.polynomial}",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
     }
 }
 
+// ─── Adjacency matrix overlay panel ───────────────────────────────────────────
 @Composable
 private fun AdjacencyMatrixPanel(
     graph: com.sunrider.graphapp.model.Graph,
@@ -732,7 +933,7 @@ private fun AdjacencyMatrixPanel(
     modifier: Modifier = Modifier
 ) {
     val (sortedVertices, matrix) = if (isWeighted) graph.getWeightedAdjacencyMatrix()
-        else graph.getAdjacencyMatrix()
+    else graph.getAdjacencyMatrix()
     val cellSize = 36.dp
 
     Surface(
@@ -742,95 +943,80 @@ private fun AdjacencyMatrixPanel(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "Матрица смежности",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Матрица смежности",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
                 )
-            )
-
+                NavCircle(icon = Icons.Filled.Close, onClick = onHide)
+            }
             Spacer(Modifier.height(8.dp))
-
             Box(
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
                     .padding(4.dp)
             ) {
                 Column {
-                    // Header row
                     Row {
-                        // Empty corner cell
-                        Box(
-                            modifier = Modifier.size(cellSize),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+                        Box(modifier = Modifier.size(cellSize))
                         sortedVertices.forEach { v ->
-                            Box(
-                                modifier = Modifier.size(cellSize),
-                                contentAlignment = Alignment.Center
-                            ) {
+                            Box(modifier = Modifier.size(cellSize), contentAlignment = Alignment.Center) {
                                 Text(
                                     text = "$v",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    ),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
                     }
-
-                    // Matrix rows
                     matrix.forEachIndexed { rowIndex, row ->
                         Row {
-                            // Row header
-                            Box(
-                                modifier = Modifier.size(cellSize),
-                                contentAlignment = Alignment.Center
-                            ) {
+                            Box(modifier = Modifier.size(cellSize), contentAlignment = Alignment.Center) {
                                 Text(
                                     text = "${sortedVertices[rowIndex]}",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    ),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
                             row.forEachIndexed { colIndex, value ->
-                                val bgColor = when {
-                                    rowIndex == colIndex -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                    value > 0 -> MaterialTheme.colorScheme.primaryContainer
-                                    else -> Color.Transparent
+                                val diag = rowIndex == colIndex
+                                val bg = when {
+                                    diag -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                    value > 0 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    else -> MaterialTheme.colorScheme.surface
                                 }
                                 Box(
                                     modifier = Modifier
                                         .size(cellSize)
+                                        .padding(2.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(bg)
                                         .border(
-                                            0.5.dp,
-                                            MaterialTheme.colorScheme.outlineVariant,
-                                            RoundedCornerShape(2.dp)
-                                        )
-                                        .background(bgColor),
+                                            1.dp,
+                                            MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                            RoundedCornerShape(8.dp)
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "$value",
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = if (value > 0) FontWeight.Bold else FontWeight.Normal
-                                        ),
-                                        color = if (value > 0)
-                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        text = if (diag) "—" else "$value",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (diag)
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                        else if (value > 0)
+                                            MaterialTheme.colorScheme.primary
                                         else
                                             MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -839,12 +1025,6 @@ private fun AdjacencyMatrixPanel(
                         }
                     }
                 }
-            }
-
-            Spacer(Modifier.height(4.dp))
-
-            TextButton(onClick = onHide) {
-                Text("Скрыть")
             }
         }
     }
