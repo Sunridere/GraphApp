@@ -10,7 +10,16 @@ class ChromaticAdditionAlgorithm : GraphAlgorithm {
     override val description = "Вычисление хроматического полинома методом добавления рёбер"
 
     override fun execute(graph: Graph, vertexPositions: Map<Int, Offset>): AlgorithmResult {
-        val root = compute(graph, vertexPositions, "G", 0)
+        val initialLabels = graph.vertices.associateWith { listOf(it) }
+        val initialHistory = listOf(
+            GraphHistoryStep(
+                graph = graph,
+                positions = vertexPositions,
+                vertexLabels = initialLabels,
+                description = "Исходный граф G"
+            )
+        )
+        val root = compute(graph, vertexPositions, initialLabels, initialHistory, "G", 0)
         val levels = buildLevels(root)
         val (chi, count) = computeChromaticInfo(root.polynomial, graph.vertexCount)
         return AlgorithmResult(root.polynomial, levels, chi, count)
@@ -19,6 +28,8 @@ class ChromaticAdditionAlgorithm : GraphAlgorithm {
     private fun compute(
         graph: Graph,
         positions: Map<Int, Offset>,
+        vertexLabels: Map<Int, List<Int>>,
+        history: List<GraphHistoryStep>,
         label: String,
         depth: Int
     ): RecursionNode {
@@ -39,6 +50,8 @@ class ChromaticAdditionAlgorithm : GraphAlgorithm {
                 label = label,
                 graph = graph,
                 positions = positions,
+                vertexLabels = vertexLabels,
+                history = history,
                 depth = depth,
                 polynomial = poly,
                 isBaseCase = true,
@@ -52,12 +65,28 @@ class ChromaticAdditionAlgorithm : GraphAlgorithm {
         val addedGraph = graph.addEdge(nonEdge.from, nonEdge.to)
         val contractedGraph = graph.contractEdge(nonEdge)
         val contractedPositions = contractPositions(positions, nonEdge)
+        val contractedLabels = contractLabels(vertexLabels, nonEdge)
 
         val leftLabel = label + "₁"
         val rightLabel = label + "₂"
 
-        val leftNode = compute(addedGraph, positions, leftLabel, depth + 1)
-        val rightNode = compute(contractedGraph, contractedPositions, rightLabel, depth + 1)
+        val leftHistory = history + GraphHistoryStep(
+            graph = addedGraph,
+            positions = positions,
+            vertexLabels = vertexLabels,
+            description = "Добавляем ребро ${nonEdge.from}-${nonEdge.to} → $leftLabel",
+            highlightedEdge = nonEdge
+        )
+        val rightHistory = history + GraphHistoryStep(
+            graph = contractedGraph,
+            positions = contractedPositions,
+            vertexLabels = contractedLabels,
+            description = "Стягиваем ребро ${nonEdge.from}-${nonEdge.to} → $rightLabel",
+            highlightedEdge = nonEdge
+        )
+
+        val leftNode = compute(addedGraph, positions, vertexLabels, leftHistory, leftLabel, depth + 1)
+        val rightNode = compute(contractedGraph, contractedPositions, contractedLabels, rightHistory, rightLabel, depth + 1)
 
         val result = leftNode.polynomial + rightNode.polynomial
 
@@ -65,6 +94,8 @@ class ChromaticAdditionAlgorithm : GraphAlgorithm {
             label = label,
             graph = graph,
             positions = positions,
+            vertexLabels = vertexLabels,
+            history = history,
             depth = depth,
             polynomial = result,
             isBaseCase = false,

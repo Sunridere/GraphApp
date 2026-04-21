@@ -11,7 +11,16 @@ class ChromaticPolynomialAlgorithm : GraphAlgorithm {
     override val description = "Вычисление хроматического полинома методом удаления-стягивания (две леммы)"
 
     override fun execute(graph: Graph, vertexPositions: Map<Int, Offset>): AlgorithmResult {
-        val root = compute(graph, vertexPositions, "G", 0)
+        val initialLabels = graph.vertices.associateWith { listOf(it) }
+        val initialHistory = listOf(
+            GraphHistoryStep(
+                graph = graph,
+                positions = vertexPositions,
+                vertexLabels = initialLabels,
+                description = "Исходный граф G"
+            )
+        )
+        val root = compute(graph, vertexPositions, initialLabels, initialHistory, "G", 0)
         val levels = buildLevels(root)
         val (chi, count) = computeChromaticInfo(root.polynomial, graph.vertexCount)
         return AlgorithmResult(root.polynomial, levels, chi, count)
@@ -20,6 +29,8 @@ class ChromaticPolynomialAlgorithm : GraphAlgorithm {
     private fun compute(
         graph: Graph,
         positions: Map<Int, Offset>,
+        vertexLabels: Map<Int, List<Int>>,
+        history: List<GraphHistoryStep>,
         label: String,
         depth: Int
     ): RecursionNode {
@@ -42,6 +53,8 @@ class ChromaticPolynomialAlgorithm : GraphAlgorithm {
                 label = label,
                 graph = graph,
                 positions = positions,
+                vertexLabels = vertexLabels,
+                history = history,
                 depth = depth,
                 polynomial = poly,
                 isBaseCase = true,
@@ -56,6 +69,8 @@ class ChromaticPolynomialAlgorithm : GraphAlgorithm {
                 label = label,
                 graph = graph,
                 positions = positions,
+                vertexLabels = vertexLabels,
+                history = history,
                 depth = depth,
                 polynomial = poly,
                 isBaseCase = true,
@@ -69,12 +84,28 @@ class ChromaticPolynomialAlgorithm : GraphAlgorithm {
         val deletedGraph = graph.removeEdge(edge)
         val contractedGraph = graph.contractEdge(edge)
         val contractedPositions = contractPositions(positions, edge)
+        val contractedLabels = contractLabels(vertexLabels, edge)
 
         val leftLabel = label + "₁"
         val rightLabel = label + "₂"
 
-        val leftNode = compute(deletedGraph, positions, leftLabel, depth + 1)
-        val rightNode = compute(contractedGraph, contractedPositions, rightLabel, depth + 1)
+        val leftHistory = history + GraphHistoryStep(
+            graph = deletedGraph,
+            positions = positions,
+            vertexLabels = vertexLabels,
+            description = "Удаляем ребро ${edge.from}-${edge.to} → $leftLabel",
+            highlightedEdge = edge
+        )
+        val rightHistory = history + GraphHistoryStep(
+            graph = contractedGraph,
+            positions = contractedPositions,
+            vertexLabels = contractedLabels,
+            description = "Стягиваем ребро ${edge.from}-${edge.to} → $rightLabel",
+            highlightedEdge = edge
+        )
+
+        val leftNode = compute(deletedGraph, positions, vertexLabels, leftHistory, leftLabel, depth + 1)
+        val rightNode = compute(contractedGraph, contractedPositions, contractedLabels, rightHistory, rightLabel, depth + 1)
 
         val result = leftNode.polynomial - rightNode.polynomial
 
@@ -82,6 +113,8 @@ class ChromaticPolynomialAlgorithm : GraphAlgorithm {
             label = label,
             graph = graph,
             positions = positions,
+            vertexLabels = vertexLabels,
+            history = history,
             depth = depth,
             polynomial = result,
             isBaseCase = false,

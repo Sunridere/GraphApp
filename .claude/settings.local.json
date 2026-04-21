@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(./gradlew assembleDebug)",
-      "Bash(grep -E \"\\\\.\\(kt|xml\\)$\")"
+      "Bash(grep -E \"\\\\.\\(kt|xml\\)$\")",
+      "Bash(xargs grep:*)",
+      "Bash(./gradlew compileDebugKotlin)",
+      "Bash(./gradlew.bat compileDebugKotlin)"
     ]
   }
 }

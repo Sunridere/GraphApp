@@ -21,11 +21,14 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sunrider.graphapp.algorithm.formatVertexLabel
 import com.sunrider.graphapp.model.Edge
 import com.sunrider.graphapp.model.Graph
 import com.sunrider.graphapp.viewmodel.EditMode
@@ -258,17 +261,26 @@ fun GraphPreview(
     graph: Graph,
     vertexPositions: Map<Int, Offset> = emptyMap(),
     highlightedEdge: Edge? = null,
+    vertexLabels: Map<Int, List<Int>> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+
     Canvas(
         modifier = modifier.background(Color(0xFFEEEEEE))
     ) {
         if (graph.vertices.isEmpty()) return@Canvas
 
+        val isLarge = size.minDimension > with(density) { 120.dp.toPx() }
+        val r = if (isLarge) with(density) { 18.dp.toPx() } else with(density) { 7.dp.toPx() }
+        val fontSize = if (isLarge) 12.sp else 6.sp
+        val edgeStroke = if (isLarge) 3f else 1.5f
+        val highlightStroke = if (isLarge) 5f else 3f
+
         val sourcePositions = if (vertexPositions.isNotEmpty()) vertexPositions
         else autoLayout(graph, size.width, size.height)
-        val positions = scaleToFit(sourcePositions, size.width, size.height, padding = 10f)
-        val r = 8f
+        val positions = scaleToFit(sourcePositions, size.width, size.height, padding = r + 6f)
 
         graph.edges.forEach { edge ->
             val from = positions[edge.from] ?: return@forEach
@@ -278,13 +290,26 @@ fun GraphPreview(
                 color = if (isHighlighted) Color(0xFFE53935) else Color(0xFF9E9E9E),
                 start = from,
                 end = to,
-                strokeWidth = if (isHighlighted) 3f else 1.5f
+                strokeWidth = if (isHighlighted) highlightStroke else edgeStroke
             )
         }
 
         graph.vertices.forEach { id ->
             val pos = positions[id] ?: return@forEach
             drawCircle(color = Color(0xFF1E88E5), radius = r, center = pos)
+
+            val labelText = formatVertexLabel(id, vertexLabels)
+            val textLayout = textMeasurer.measure(
+                text = AnnotatedString(labelText),
+                style = TextStyle(color = Color.White, fontSize = fontSize)
+            )
+            drawText(
+                textLayoutResult = textLayout,
+                topLeft = Offset(
+                    pos.x - textLayout.size.width / 2,
+                    pos.y - textLayout.size.height / 2
+                )
+            )
         }
     }
 }

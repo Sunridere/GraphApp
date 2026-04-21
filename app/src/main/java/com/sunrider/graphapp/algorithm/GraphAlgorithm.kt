@@ -5,10 +5,20 @@ import com.sunrider.graphapp.model.Edge
 import com.sunrider.graphapp.model.Graph
 import com.sunrider.graphapp.model.Polynomial
 
+data class GraphHistoryStep(
+    val graph: Graph,
+    val positions: Map<Int, Offset>,
+    val vertexLabels: Map<Int, List<Int>>,
+    val description: String,
+    val highlightedEdge: Edge? = null
+)
+
 data class RecursionNode(
     val label: String,
     val graph: Graph,
     val positions: Map<Int, Offset>,
+    val vertexLabels: Map<Int, List<Int>>,
+    val history: List<GraphHistoryStep>,
     val depth: Int,
     val polynomial: Polynomial,
     val isBaseCase: Boolean,
@@ -23,6 +33,8 @@ data class LevelEntry(
     val label: String,
     val graph: Graph,
     val positions: Map<Int, Offset>,
+    val vertexLabels: Map<Int, List<Int>>,
+    val history: List<GraphHistoryStep>,
     val edge: Edge? = null,
     val isBaseCase: Boolean,
     val formulaText: String,
@@ -42,6 +54,24 @@ data class AlgorithmResult(
     val chromaticNumber: Int,
     val coloringCount: Long
 )
+
+/** Форматирует подпись вершины: если к ней слиты несколько исходных id — показывает "(1,2)". */
+fun formatVertexLabel(vertexId: Int, labels: Map<Int, List<Int>>): String {
+    if (labels.isEmpty()) return vertexId.toString()
+    val ids = labels[vertexId] ?: listOf(vertexId)
+    return if (ids.size <= 1) (ids.firstOrNull() ?: vertexId).toString()
+    else "(${ids.joinToString(",")})"
+}
+
+/** Обновляет карту меток вершин при стягивании ребра: все исходные id объединяются в оставшейся вершине. */
+fun contractLabels(labels: Map<Int, List<Int>>, edge: Edge): Map<Int, List<Int>> {
+    val keep = minOf(edge.from, edge.to)
+    val remove = maxOf(edge.from, edge.to)
+    val keepLabels = labels[keep] ?: listOf(keep)
+    val removeLabels = labels[remove] ?: listOf(remove)
+    val merged = (keepLabels + removeLabels).distinct().sorted()
+    return (labels - remove) + (keep to merged)
+}
 
 fun computeChromaticInfo(polynomial: Polynomial, maxVertices: Int): Pair<Int, Long> {
     if (polynomial.isZero) return Pair(0, 0L)
@@ -113,6 +143,8 @@ fun buildLevels(root: RecursionNode): List<RecursionLevel> {
                     label = node.label,
                     graph = node.graph,
                     positions = node.positions,
+                    vertexLabels = node.vertexLabels,
+                    history = node.history,
                     isBaseCase = true,
                     formulaText = "Граф ${node.label} — базовый случай",
                     detailText = node.baseCaseDescription,
@@ -127,6 +159,8 @@ fun buildLevels(root: RecursionNode): List<RecursionLevel> {
                     label = node.label,
                     graph = node.graph,
                     positions = node.positions,
+                    vertexLabels = node.vertexLabels,
+                    history = node.history,
                     edge = node.edge,
                     isBaseCase = false,
                     formulaText = "Для графа ${node.label} $operationDesc ребро ${node.edge} и стягиваем вершины ${node.edge}",
@@ -186,6 +220,8 @@ fun buildLevels(root: RecursionNode): List<RecursionLevel> {
                     label = root.label,
                     graph = root.graph,
                     positions = root.positions,
+                    vertexLabels = root.vertexLabels,
+                    history = root.history,
                     isBaseCase = false,
                     formulaText = "P(${root.label}) = $step1Text",
                     polynomial = root.polynomial
@@ -202,6 +238,8 @@ fun buildLevels(root: RecursionNode): List<RecursionLevel> {
                     label = root.label,
                     graph = root.graph,
                     positions = root.positions,
+                    vertexLabels = root.vertexLabels,
+                    history = root.history,
                     isBaseCase = false,
                     formulaText = "= $step2Text",
                     detailText = "P(${root.label}) = ${root.polynomial}",

@@ -54,6 +54,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sunrider.graphapp.algorithm.GraphAlgorithm
+import com.sunrider.graphapp.algorithm.GraphHistoryStep
 import com.sunrider.graphapp.algorithm.LevelEntry
 import com.sunrider.graphapp.algorithm.RecursionLevel
 import com.sunrider.graphapp.ui.components.GraphCanvas
@@ -86,6 +90,7 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
             viewModel.algorithms.firstOrNull()?.let { AlgoChoice.Algo(it) } ?: AlgoChoice.Mst
         )
     }
+    var detailEntry by remember { mutableStateOf<LevelEntry?>(null) }
 
     Column(
         modifier = modifier
@@ -107,6 +112,7 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .clipToBounds()
         ) {
             val mstEdges = if (viewModel.showMstResult) viewModel.mstResult?.edges ?: emptySet() else emptySet()
 
@@ -201,6 +207,7 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
                         onNext = { viewModel.nextLevel() },
                         onGoToLevel = { viewModel.goToLevel(it) },
                         onHide = { viewModel.hideResult() },
+                        onGraphClick = { entry -> detailEntry = entry },
                         modifier = Modifier.align(Alignment.BottomCenter)
                     )
                 }
@@ -236,6 +243,13 @@ fun MainScreen(viewModel: GraphViewModel, onOpenMatrixInput: () -> Unit = {}, mo
             currentWeight = viewModel.graph.getWeight(edge),
             onConfirm = { viewModel.confirmEditWeight(it) },
             onDismiss = { viewModel.cancelEditWeight() }
+        )
+    }
+
+    detailEntry?.let { entry ->
+        GraphDetailDialog(
+            entry = entry,
+            onDismiss = { detailEntry = null }
         )
     }
 }
@@ -723,6 +737,7 @@ private fun ResultPanel(
     onNext: () -> Unit,
     onGoToLevel: (Int) -> Unit,
     onHide: () -> Unit,
+    onGraphClick: (LevelEntry) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -788,7 +803,8 @@ private fun ResultPanel(
                     LevelItem(
                         level = level,
                         isCurrent = index == currentLevelIndex,
-                        onClick = { onGoToLevel(index) }
+                        onClick = { onGoToLevel(index) },
+                        onGraphClick = onGraphClick
                     )
                 }
             }
@@ -839,7 +855,8 @@ private fun StatBlock(label: String, value: String) {
 private fun LevelItem(
     level: RecursionLevel,
     isCurrent: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onGraphClick: (LevelEntry) -> Unit
 ) {
     val bgColor = if (isCurrent)
         MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -872,14 +889,22 @@ private fun LevelItem(
         )
         Spacer(Modifier.height(4.dp))
         level.entries.forEach { entry ->
-            LevelEntryItem(entry = entry, showGraph = !level.isBackSubstitution)
+            LevelEntryItem(
+                entry = entry,
+                showGraph = !level.isBackSubstitution,
+                onGraphClick = { onGraphClick(entry) }
+            )
             Spacer(Modifier.height(2.dp))
         }
     }
 }
 
 @Composable
-private fun LevelEntryItem(entry: LevelEntry, showGraph: Boolean = true) {
+private fun LevelEntryItem(
+    entry: LevelEntry,
+    showGraph: Boolean = true,
+    onGraphClick: () -> Unit = {}
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -889,9 +914,11 @@ private fun LevelEntryItem(entry: LevelEntry, showGraph: Boolean = true) {
                 graph = entry.graph,
                 vertexPositions = entry.positions,
                 highlightedEdge = entry.edge,
+                vertexLabels = entry.vertexLabels,
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(6.dp))
+                    .clickable { onGraphClick() }
             )
             Spacer(Modifier.width(8.dp))
         }
@@ -1023,6 +1050,154 @@ private fun AdjacencyMatrixPanel(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Graph detail dialog (fullscreen with history) ────────────────────────────
+@Composable
+private fun GraphDetailDialog(
+    entry: LevelEntry,
+    onDismiss: () -> Unit
+) {
+    val history = entry.history
+    var stepIndex by remember(entry) { mutableStateOf((history.size - 1).coerceAtLeast(0)) }
+    val currentStep: GraphHistoryStep? = history.getOrNull(stepIndex)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Header
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Граф ${entry.label}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    NavCircle(icon = Icons.Filled.Close, onClick = onDismiss)
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // Step description
+                if (currentStep != null) {
+                    Text(
+                        text = "Шаг ${stepIndex + 1} из ${history.size}",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 0.4.sp
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = currentStep.description,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Graph area
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                            RoundedCornerShape(12.dp)
+                        )
+                ) {
+                    if (currentStep != null) {
+                        GraphPreview(
+                            graph = currentStep.graph,
+                            vertexPositions = currentStep.positions,
+                            highlightedEdge = currentStep.highlightedEdge,
+                            vertexLabels = currentStep.vertexLabels,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Polynomial for this entry
+                Text(
+                    text = "P(${entry.label}) = ${entry.polynomial}",
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Navigation
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { if (stepIndex > 0) stepIndex-- },
+                        enabled = stepIndex > 0,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = "Назад",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Назад", fontSize = 13.sp)
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    Text(
+                        text = "${stepIndex + 1} / ${history.size}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.weight(1f))
+
+                    Button(
+                        onClick = { if (stepIndex < history.size - 1) stepIndex++ },
+                        enabled = stepIndex < history.size - 1,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Text("Далее", fontSize = 13.sp)
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Далее",
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
